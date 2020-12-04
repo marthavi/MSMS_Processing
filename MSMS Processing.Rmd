@@ -1,0 +1,319 @@
+---
+title: "MSMS Processing and Annotation"
+author: 
+date: "22/9/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+#1. Environment
+```{r message=FALSE, warning=FALSE}
+setwd("~/1_Cacao_Buenaventura/MSMS_Processing and Annotation")
+library(tidyverse)
+library(dplyr)
+library(ggplot2)
+library(bigmemory)
+library(biganalytics)
+library(Matrix)
+library(data.table)
+```
+
+# 2.Functions
+
+```{r}
+distancia <- function(Vector,ref){
+  # Calculo matriz de distancias 
+  N   <- length(Vector)
+  mat <- big.matrix(nrow = N, ncol = N, init = 0)
+  
+  for (i in 1:(N-1)){
+    d   <- abs(Vector[i]-Vector)
+    d   <- ifelse(d >= ref, d, 0)
+    #mat[i,(i+1):N] <- d[(i+1):N]
+    mat[i,] <- d
+    print(i)
+  }
+  
+  return(mat)
+}
+
+numnzero <- function(mat,ref){
+  # Numero de datos diferentes de cero
+  cont <- 0
+  N    <- length(mat[,1])
+  for (i in 1:N){
+    cont = cont + length( which(mat[i,]>ref) )
+    print(i)
+  }
+  
+  return(cont)
+}
+
+frecuencia.fila <- function(mat,ref){
+  # Numero de datos diferentes de cero
+  N    <- length(mat[,1])
+  Val  <- big.matrix(nrow = N, ncol = 1, init = 0)
+  
+  for (i in 1:N){
+    Val[i] <- length(which(mat[i,i:N]>ref) )
+    print(i)
+  }
+  
+  return(Val)
+}
+
+
+convert2vector <- function(mat,ref,cont){
+  # Vector con solo los elementos diferentes de cero 
+  Val  <- big.matrix(nrow = cont, ncol = 1, init = 0)
+  oldn <- 0
+  N    <- length(mat[,1])
+  
+  for (i in 1:(N)){
+    idx <- which(mat[i,]>0)
+    n   <- length(idx)
+    if (n>0){
+      Val[(oldn+1):(oldn+n)] <-  mat[i,idx]
+    }
+    
+    oldn <- n
+    print(i)
+  }
+  Val <- as.matrix(Val)
+  return(Val[which(Val>0)])
+}
+
+
+```
+
+# 3. Calculo de matrices
+```{r}
+# Se carga el archivo 
+archivo <- "Spectra/MZ237.64.csv"
+datos   <- read.csv(file = archivo)
+ref     <- 57.021
+
+# Datos de intensidad y mass 
+datos.X10.ev   <- datos[!(is.na(datos[,1])),1:2] %>%
+  arrange(desc(X10eV)) %>%
+  filter(X10eV >= 10) %>%
+  as.matrix()
+
+datos.X15.ev   <- datos[!(is.na(datos[,3])),3:4] %>%
+  arrange(desc(X15eV)) %>%
+  filter(X15eV >= 10) %>%
+  as.matrix()
+
+datos.X35.ev   <- datos[!(is.na(datos[,5])),5:6] %>%
+  arrange(desc(X35eV)) %>%
+  filter(X35eV >= 10) %>%
+  as.matrix()
+
+rm(datos)
+
+# Matriz de distancias 
+start.time <- Sys.time()
+mat.X10.ev <- distancia(datos.X10.ev[,1],ref)
+end.time   <- Sys.time()
+time.taken <- end.time - start.time
+time.taken
+
+start.time <- Sys.time()
+mat.X15.ev <- distancia(datos.X15.ev[,1],ref)
+end.time   <- Sys.time()
+time.taken <- end.time - start.time
+time.taken
+
+start.time <- Sys.time()
+mat.X35.ev <- distancia(datos.X35.ev[,1],ref)
+end.time   <- Sys.time()
+time.taken <- end.time - start.time
+time.taken
+
+
+```
+
+```{r}
+# Numero de elementos diferentes de cero para cada mass 
+frecuencia.x10.ev <- frecuencia.fila(mat.X10.ev,ref)
+frecuencia.x15.ev <- frecuencia.fila(mat.X15.ev,ref)
+frecuencia.x35.ev <- frecuencia.fila(mat.X35.ev,ref)
+
+data1 <- as.data.table(as.matrix(frecuencia.x10.ev))
+data1$Energy <- 'x10.ev'
+names(data1)[names(data1) == "V1"] <- "frec"
+data1$mass       <- datos.X10.ev[,1]
+data1$intensity  <- datos.X10.ev[,2]
+data1$rate       <- data1$intensity*data1$frec / sum(data1$intensity*data1$frec)*100
+data1            <- data1 %>%
+                    arrange(desc(rate)) %>%
+                    filter(rate > 0)
+
+
+data2 <- as.data.table(as.matrix(frecuencia.x15.ev))
+data2$Energy <- 'x15.ev'
+names(data2)[names(data2) == "V1"] <- "frec"
+data2$mass       <- datos.X15.ev[,1]
+data2$intensity  <- datos.X15.ev[,2]
+data2$rate       <- data2$intensity*data2$frec / sum(data2$intensity*data2$frec)*100
+data2            <- data2 %>%
+  arrange(desc(rate)) %>%
+  filter(rate > 0)
+
+
+data3 <- as.data.table(as.matrix(frecuencia.x35.ev))
+data3$Energy <- 'x35.ev'
+names(data3)[names(data3) == "V1"] <- "frec"
+data3$mass       <- datos.X35.ev[,1]
+data3$intensity      <- datos.X35.ev[,2]
+data3$rate       <- data3$intensity*data3$frec / sum(data3$intensity*data3$frec)*100
+data3            <- data3 %>%
+  arrange(desc(rate)) %>%
+  filter(rate > 0)
+
+data <- rbind(data1,data2,data3)
+#rm(data1,data2,data3)
+
+# Grafico del espectro de mass  
+ggplot(data, aes(x=mass, y=rate, color = Energy)) + 
+  geom_point(size = 1) +
+  geom_segment(aes(x=mass, 
+                   xend=mass, 
+                   y=0, 
+                   yend=rate))
+
+```
+
+
+
+```{r}
+ggplot(data, aes(x=mass, y=rate, color = Energy)) + 
+  geom_point(size = 1) +
+  geom_segment(aes(x=mass, 
+                   xend=mass, 
+                   y=0, 
+                   yend=rate)) +
+  facet_grid(Energy ~ ., scales = "free_y")
+```
+
+
+
+```{r}
+mass       <- c()
+porcentaje <- c()
+aux        <- data3
+Nite       <- 100
+cont       <- 0
+terminar   <- FALSE
+
+for (i in 1:100) {
+  idx        <- which(abs(aux$mass - aux$mass[1]) <= 1)
+  mass       <- append(mass,mean(aux$mass[idx]))
+  porcentaje <- append(porcentaje,mean(aux$rate[idx]))
+  aux        <- aux[-idx,]
+  
+  if (length(aux$mass) == 0){
+    break
+  }
+}
+
+filtrar <- function(data,ref){
+  
+  mass       <- c()
+  porcentaje <- c()
+  aux        <- data
+  terminar   <- FALSE
+  
+  for (i in 1:100) {
+    idx        <- which(abs(aux$mass - aux$mass[1]) <= ref)
+    mass       <- append(mass,mean(aux$mass[idx]))
+    porcentaje <- append(porcentaje,sum(aux$rate[idx]))
+    aux        <- aux[-idx,]
+    
+    if (length(aux$mass) == 0){
+      break
+    }
+  }
+  return(data.frame(mass = mass, rate= porcentaje))
+}
+
+data_sel     <- select(data3,mass,rate)
+data_sel$filtro  <- "0"
+data_filter1 <- filtrar(data3,1)
+data_filter1$filtro <- "1"
+data_filter2 <- filtrar(data3,2)
+data_filter2$filtro <- "2"
+data_filter3 <- filtrar(data3,10)
+data_filter3$filtro <- "10"
+data_filtrado <- rbind(data_sel,data_filter1,data_filter2,data_filter3)
+
+
+ggplot(data_filtrado, aes(x=mass, y=rate, color = filtro)) + 
+  geom_point(size = 1) +
+  geom_segment(aes(x=mass, 
+                   xend=mass, 
+                   y=0, 
+                   yend=rate)) +
+  facet_wrap(vars(filtro))
+
+
+```
+
+
+
+# 4. Maximum fragment
+```{r}
+max10ev <- data %>% 
+  dplyr::filter(Energy %in% "x10.ev") %>% 
+  arrange(desc(intensity))
+head(max10ev, 50)
+
+```
+
+```{r}
+Low <- max10ev %>% 
+  select(c(mass, rate)) %>% 
+  arrange(desc(rate)) 
+
+low <- paste(Low$mass, Low$rate, sep = " ") 
+
+write.csv(low, file = "237_Low.csv")
+```
+
+
+```{r}
+max15ev <- data %>% 
+  dplyr::filter(Energy %in% "x15.ev") %>% 
+  arrange(desc(intensity))
+head(max15ev, 100)
+
+```
+
+```{r}
+Medium <- max15ev %>% 
+  select(c(mass, rate)) %>% 
+  arrange(desc(rate))
+head(Medium, 100)
+
+medium <- paste(Medium$mass, Medium$rate, sep = " ")
+
+write.csv(medium, file = "237_Medium.csv")
+```
+
+
+```{r}
+max35ev <- data_filtrado %>% 
+  dplyr::filter(filtro == 2) %>% 
+  arrange(desc(rate))
+head(max35ev, 50)
+
+High <- paste(max35ev$mass, max35ev$rate, sep = " ")
+
+write.csv(High, file = "237_high.csv")
+```
+
+
+
